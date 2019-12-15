@@ -1,0 +1,120 @@
+from flask_api import FlaskAPI
+from flask import request
+import json
+import pugsql
+from werkzeug.wrappers import BaseResponse as Response
+from werkzeug.datastructures import Headers
+app = FlaskAPI(__name__)
+
+# Load PugSQL resources
+queries = pugsql.module('resources/pugsql/playlists')
+queries.connect('sqlite:///resources/db_schema/music_playlists.db')
+
+@app.route('/api/v1/playlist', methods = [ 'POST' ])
+def create_playlist():
+    # Get JSON data from the request body
+    data = request.json
+    # Check for optional 'description' property
+    if 'description' not in data:
+        data['description'] = None
+
+    try:
+        results = queries.create_playlist(data)
+        return Response('{"playlist_id":' + str(results) + '}', status=201, headers=Headers([('Content-Type', 'application/json'),('Location','/api/v1/playlist/' + str(results))]))
+    except BaseException:
+        return Response('{"message":"Playlist already exists"}', status=409, headers=Headers([('Content-Type', 'application/json')]))
+
+@app.route('/api/v1/playlist/<int:playlist_id>', methods = [ 'GET' ])
+def get_playlist(playlist_id):
+    results = queries.get_playlist(playlist_id=playlist_id)
+    playlist_track_results = queries.get_playlist_track_by_playlist(playlist_id=playlist_id)
+    # Build the playlist_track_list and add to results dictionary
+    playlist_track_list = []
+    for playlist_track in playlist_track_results:
+        playlist_track_list.append(playlist_track['track_service_url'])
+    if results:
+        results['playlist_track_list'] = list(playlist_track_list)
+    # Check if optional description is null, if so remove
+    if results and results['description'] == None:
+        del results['description']
+
+    if(results != None):
+        return Response(json.dumps(results), status=200, headers=Headers([('Content-Type', 'application/json')]))
+    else:
+        return Response('{"message":"Playlist not found"}', status=404, headers=Headers([('Content-Type', 'application/json')]))
+
+@app.route('/api/v1/playlist/<int:playlist_id>', methods = [ 'DELETE' ])
+def delete_playlist(playlist_id):
+    results = int(queries.delete_playlist(playlist_id=playlist_id))
+    if results > 0:
+        return Response('{"message":"Playlist deleted"}', status=200, headers=Headers([('Content-Type', 'application/json')]))
+    else:
+        return Response('{"message":"Could not delete playlist, playlist not found"}', status=404, headers=Headers([('Content-Type', 'application/json')]))
+
+@app.route('/api/v1/playlist/all', methods = [ 'GET' ])
+def get_all_playlists():
+    results = list(queries.get_all_playlists())
+    # Go through each playlist and add playlist_track_list
+    for playlist in results:
+        playlist_track_results = queries.get_playlist_track_by_playlist(playlist_id = playlist['playlist_id'])
+        # Build the playlist_track_list and add to results dictionary
+        playlist_track_list = []
+        for playlist_track in playlist_track_results:
+            playlist_track_list.append(playlist_track['track_service_url'])
+        playlist['playlist_track_list'] = list(playlist_track_list)
+        # Check if optional description is null, if so remove
+        if playlist['description'] == None:
+            del playlist['description']
+
+    if results:
+        return Response(json.dumps(results), status=200, headers=Headers([('Content-Type', 'application/json')]))
+    else:
+        return Response('{"message":"No Playlists found"}', status=404, headers=Headers([('Content-Type', 'application/json')]))
+
+@app.route('/api/v1/playlist/all/<int:user_id>', methods = [ 'GET' ])
+def get_all_playlists_by_user(user_id):
+    results = list(queries.get_all_playlists_by_user(user_id=user_id))
+    # Go through each playlist and add playlist_track_list
+    for playlist in results:
+        playlist_track_results = queries.get_playlist_track_by_playlist(playlist_id = playlist['playlist_id'])
+        # Build the playlist_track_list and add to results dictionary
+        playlist_track_list = []
+        for playlist_track in playlist_track_results:
+            playlist_track_list.append(playlist_track['track_service_url'])
+        playlist['playlist_track_list'] = list(playlist_track_list)
+        # Check if optional description is null, if so remove
+        if playlist['description'] == None:
+            del playlist['description']
+
+    if results:
+        return Response(json.dumps(results), status=200, headers=Headers([('Content-Type', 'application/json')]))
+    else:
+        return Response('{"message":"Playlists by user not found"}', status=404, headers=Headers([('Content-Type', 'application/json')]))
+
+# Extra API endpoint to add tracks to a playlist; for convienence
+@app.route('/api/v1/playlist/<int:playlist_id>/track', methods = [ 'POST' ])
+def create_playlist_track(playlist_id):
+    # Get JSON data from the request body
+    data = request.json
+    # Add playlist_id to data dictionary
+    data['playlist_id'] = playlist_id
+    # Build track_service_url and add to data dictionary
+    data['track_service_url'] = 'http://localhost:5100/api/v1/track/' + str(data['track_id'])
+
+    try:
+        results = queries.create_playlist_track(data)
+        return Response('{"playlist_track_id":' + str(results) + '}', status=201, headers=Headers([('Content-Type', 'application/json'),('Location','/api/v1/playlist/' + str(playlist_id) + '/track/all')]))
+    except BaseException:
+        return Response('{"message":"Playlist Track already exists"}', status=409, headers=Headers([('Content-Type', 'application/json')]))
+
+# Extra API endpoint to get all tracks in a playlist; for convienence
+@app.route('/api/v1/playlist/<int:playlist_id>/track/all', methods = [ 'GET' ])
+def get_playlist_track(playlist_id):
+    results = list(queries.get_all_playlist_tracks(playlist_id=playlist_id))
+    if results:
+        return Response(json.dumps(results), status=200, headers=Headers([('Content-Type', 'application/json')]))
+    else:
+        return Response('{"message":"Playlist Tracks not found"}', status=404, headers=Headers([('Content-Type', 'application/json')]))
+
+if __name__ == '__main__':
+   app.run(debug=True)
